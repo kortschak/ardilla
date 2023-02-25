@@ -150,7 +150,7 @@ func (d *Deck) SetImage(row, col int, img image.Image) error {
 
 	if img.Bounds() != d.desc.bounds() {
 		dst := image.NewRGBA(d.desc.bounds())
-		draw.BiLinear.Scale(dst, dst.Bounds(), img, img.Bounds(), draw.Src, nil)
+		draw.BiLinear.Scale(dst, keepAspectRatio(dst, img), img, img.Bounds(), draw.Src, nil)
 		img = dst
 	}
 
@@ -176,6 +176,21 @@ func (d *Deck) SetImage(row, col int, img image.Image) error {
 		page++
 	}
 	return nil
+}
+
+func keepAspectRatio(dst, src image.Image) image.Rectangle {
+	b := dst.Bounds()
+	dx, dy := src.Bounds().Dx(), src.Bounds().Dy()
+	switch {
+	case dx < dy:
+		dx, dy = dx*b.Max.X/dy, b.Max.Y
+	case dx > dy:
+		dx, dy = b.Max.X, dy*b.Max.Y/dx
+	default:
+		return b
+	}
+	offset := image.Point{X: (b.Dx() - dx) / 2, Y: (b.Dy() - dy) / 2}
+	return image.Rectangle{Max: image.Point{X: dx, Y: dy}}.Add(offset)
 }
 
 // Serial returns the serial number of the device.
