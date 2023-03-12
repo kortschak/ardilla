@@ -202,7 +202,7 @@ func (img aGIF) animate(ctx context.Context, dst draw.Image, fn func(image.Image
 	for i := 0; i <= loopCount || loopCount == -1; i++ {
 		for f, frame := range img.Image {
 			var restore *image.Paletted
-			if img.Disposal != nil && img.Disposal[i] == restorePrevious {
+			if img.Disposal != nil && img.Disposal[f] == restorePrevious {
 				restore = image.NewPaletted(frame.Bounds(), frame.Palette)
 				draw.Copy(restore, restore.Bounds().Min, frame, frame.Bounds(), draw.Over, nil)
 			}
@@ -227,7 +227,7 @@ func (img aGIF) animate(ctx context.Context, dst draw.Image, fn func(image.Image
 				}
 			}
 			if img.Disposal != nil {
-				switch img.Disposal[i] {
+				switch img.Disposal[f] {
 				case restoreBackground:
 					if background == nil {
 						if idx := int(img.BackgroundIndex); idx < len(frame.Palette) {
