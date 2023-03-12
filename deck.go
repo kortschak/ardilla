@@ -193,6 +193,15 @@ func keepAspectRatio(dst, src image.Image) image.Rectangle {
 	return image.Rectangle{Max: image.Point{X: dx, Y: dy}}.Add(offset)
 }
 
+// Bounds returns the image bounds for buttons on the device. If the device
+// is not visual an error is returned.
+func (d *Deck) Bounds() (image.Rectangle, error) {
+	if !d.desc.visual {
+		return image.Rectangle{}, fmt.Errorf("images not supported by %s", d.desc)
+	}
+	return d.desc.bounds(), nil
+}
+
 // Serial returns the serial number of the device.
 func (d *Deck) Serial() (string, error) {
 	payloadLen := d.desc.serialPayloadLen
