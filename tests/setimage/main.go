@@ -42,6 +42,7 @@ func Main() int {
 	}
 
 	dev := flag.String("device", "", fmt.Sprintf("device name from %s", pids))
+	ser := flag.String("serial", "", "device serial number")
 	path := flag.String("image", "", "filename of image (bmp, gif, jpeg, png or tiff)")
 	row := flag.Int("row", 0, "row of target button")
 	col := flag.Int("col", 0, "column of target button")
@@ -85,7 +86,7 @@ func Main() int {
 		return 1
 	}
 
-	d, err := ardilla.NewDeck(pid)
+	d, err := ardilla.NewDeck(pid, *ser)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "failed to open device: %v\n", err)
 		return 1

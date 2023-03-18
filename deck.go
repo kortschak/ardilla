@@ -31,13 +31,23 @@ type hidDevice interface {
 	SendFeatureReport([]byte) (int, error)
 }
 
-// NewDeck returns the first HID corresponding the the given Stream Deck pid.
-func NewDeck(pid PID) (*Deck, error) {
+// NewDeck returns the first a Deck using the HID corresponding the the given
+// Stream Deck pid and serial. If serial is empty the first matching pid is
+// used.
+func NewDeck(pid PID, serial string) (*Deck, error) {
 	desc, ok := devices[pid]
 	if !ok {
 		return nil, fmt.Errorf("%s not a valid deck device identifier", pid)
 	}
-	dev, err := hid.OpenFirst(vidElGato, uint16(pid))
+	var (
+		dev hidDevice
+		err error
+	)
+	if serial != "" {
+		dev, err = hid.Open(vidElGato, uint16(pid), serial)
+	} else {
+		dev, err = hid.OpenFirst(vidElGato, uint16(pid))
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -48,6 +58,24 @@ func NewDeck(pid PID) (*Deck, error) {
 		return nil, err
 	}
 	return d, nil
+}
+
+// Serials returns the list of El Gato device serial numbers matching the
+// provided product ID.
+func Serials(pid PID) ([]string, error) {
+	_, ok := devices[pid]
+	if !ok {
+		return nil, fmt.Errorf("%s not a valid deck device identifier", pid)
+	}
+	var serials []string
+	err := hid.Enumerate(vidElGato, uint16(pid), func(info *hid.DeviceInfo) error {
+		serials = append(serials, info.SerialNbr)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return serials, nil
 }
 
 // Sends a blank key report to the Stream Deck, resetting the key image

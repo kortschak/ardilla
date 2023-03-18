@@ -8,6 +8,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/kortschak/ardilla"
 )
@@ -28,6 +29,7 @@ func Main() int {
 	}
 
 	dev := flag.String("device", "", fmt.Sprintf("device name from %s", pids))
+	ser := flag.String("serial", "", "device serial number")
 	flag.Parse()
 
 	var pid ardilla.PID
@@ -43,9 +45,15 @@ func Main() int {
 		return 2
 	}
 
-	d, err := ardilla.NewDeck(pid)
+	d, err := ardilla.NewDeck(pid, *ser)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "failed to open device: %v\n", err)
+		if *ser != "" {
+			serials, err := ardilla.Serials(pid)
+			if err == nil {
+				fmt.Printf("available: %s\n", strings.Join(serials, ", "))
+			}
+		}
 		return 1
 	}
 	defer d.Close()

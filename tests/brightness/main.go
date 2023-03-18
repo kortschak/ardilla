@@ -28,6 +28,7 @@ func Main() int {
 	}
 
 	dev := flag.String("device", "", fmt.Sprintf("device name from %s", pids))
+	ser := flag.String("serial", "", "device serial number")
 	bright := flag.Int("bright", 100, "set brightness (0-100)")
 	flag.Parse()
 
@@ -50,7 +51,7 @@ func Main() int {
 		return 2
 	}
 
-	d, err := ardilla.NewDeck(pid)
+	d, err := ardilla.NewDeck(pid, *ser)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "failed to open device: %v\n", err)
 		return 1
