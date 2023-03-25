@@ -205,9 +205,14 @@ func (img aGIF) animate(ctx context.Context, dst draw.Image, fn func(image.Image
 			var restore *image.Paletted
 			if img.Disposal != nil && img.Disposal[f] == restorePrevious {
 				restore = image.NewPaletted(frame.Bounds(), frame.Palette)
-				draw.Copy(restore, restore.Bounds().Min, frame, frame.Bounds(), draw.Over, nil)
+				draw.Copy(restore, restore.Bounds().Min, dst, frame.Bounds(), draw.Over, nil)
 			}
 			draw.Copy(dst, frame.Bounds().Min, frame, frame.Bounds(), draw.Over, nil)
+			select {
+			case <-ctx.Done():
+				return nil
+			default:
+			}
 			err := fn(dst)
 			if err != nil {
 				return err
@@ -243,6 +248,11 @@ func (img aGIF) animate(ctx context.Context, dst draw.Image, fn func(image.Image
 				case restorePrevious:
 					draw.Copy(dst, frame.Bounds().Min, restore, restore.Bounds(), draw.Over, nil)
 				}
+			}
+			select {
+			case <-ctx.Done():
+				return nil
+			default:
 			}
 		}
 	}
