@@ -53,14 +53,18 @@ func Main() int {
 		os.Exit(2)
 	}
 
-	var pid ardilla.PID
+	pid := ardilla.PID(0xffff)
 	for _, id := range pids {
+		if *dev == "" {
+			pid = 0
+			break
+		}
 		if *dev == id.String() {
 			pid = id
 			break
 		}
 	}
-	if pid == 0 {
+	if pid == 0xffff {
 		fmt.Fprintf(os.Stderr, "%q is not a known device", *dev)
 		flag.Usage()
 		return 2

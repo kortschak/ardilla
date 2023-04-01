@@ -36,8 +36,21 @@ type hidDevice interface {
 // used.
 func NewDeck(pid PID, serial string) (*Deck, error) {
 	desc, ok := devices[pid]
-	if !ok {
+	if !ok && pid != hid.ProductIDAny {
 		return nil, fmt.Errorf("%s not a valid deck device identifier", pid)
+	}
+	if pid == hid.ProductIDAny {
+		// Find the first El Gato device with matching serial.
+		hid.Enumerate(vidElGato, uint16(pid), func(info *hid.DeviceInfo) error {
+			if serial == "" || serial == info.SerialNbr {
+				pid = PID(info.ProductID)
+			}
+			return io.EOF
+		})
+		desc, ok = devices[pid]
+		if !ok {
+			return nil, fmt.Errorf("%s not a known deck device identifier", pid)
+		}
 	}
 	var (
 		dev hidDevice
