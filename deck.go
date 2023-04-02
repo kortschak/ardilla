@@ -224,13 +224,15 @@ func (d *Deck) SetImage(row, col int, img image.Image) error {
 	return nil
 }
 
-// RawImage returns an image.Image that has been resized to fit the Deck's
-// button size and has had the internal image representation pre-computed.
+// RawImage returns an image.Image has had the internal image representation
+// pre-computed after resizing to fit the Deck's button size. The original image
+// is retained in the returned image.
 func (d *Deck) RawImage(img image.Image) (*RawImage, error) {
 	if !d.desc.visual {
 		return nil, fmt.Errorf("images not supported by %s", d.desc)
 	}
 
+	orig := img
 	if img.Bounds() != d.desc.bounds() {
 		dst := image.NewRGBA(d.desc.bounds())
 		draw.BiLinear.Scale(dst, keepAspectRatio(dst, img), img, img.Bounds(), draw.Src, nil)
@@ -243,7 +245,7 @@ func (d *Deck) RawImage(img image.Image) (*RawImage, error) {
 		return nil, err
 	}
 	return &RawImage{rawImage{
-		Image: img,
+		Image: orig,
 		data:  buf.Bytes(),
 		pid:   d.desc.PID,
 	}}, nil

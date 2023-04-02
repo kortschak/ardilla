@@ -9,6 +9,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"image"
 	"image/png"
 	"io"
 	"os"
@@ -16,6 +17,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"golang.org/x/image/draw"
 )
 
 var update = flag.Bool("update", false, "regenerate golden images")
@@ -715,24 +718,24 @@ func BenchmarkSetImage(b *testing.B) {
 				}
 			})
 
-			// rawImage contains the resized image and the raw data.
-			rawImage, err := d.RawImage(img)
-			if err != nil {
-				b.Fatalf("unexpected error: %v", err)
-			}
-
+			resized := image.NewRGBA(d.desc.bounds())
+			draw.BiLinear.Scale(resized, keepAspectRatio(resized, img), img, img.Bounds(), draw.Src, nil)
 			b.Run("resized", func(b *testing.B) {
 				for i := 0; i < b.N; i++ {
-					err = d.SetImage(0, 0, rawImage.Image)
+					err = d.SetImage(0, 0, resized)
 					if err != nil {
 						b.Errorf("unexpected error for SetImage: %v", err)
 					}
 				}
 			})
 
+			raw, err := d.RawImage(img)
+			if err != nil {
+				b.Fatalf("unexpected error: %v", err)
+			}
 			b.Run("raw", func(b *testing.B) {
 				for i := 0; i < b.N; i++ {
-					err = d.SetImage(0, 0, rawImage)
+					err = d.SetImage(0, 0, raw)
 					if err != nil {
 						b.Errorf("unexpected error for SetImage: %v", err)
 					}
