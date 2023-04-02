@@ -14,6 +14,7 @@ import (
 	"image/gif"
 	"io"
 	"os"
+	"sync"
 	"time"
 
 	_ "image/jpeg"
@@ -44,6 +45,7 @@ func Main() int {
 	dev := flag.String("device", "", fmt.Sprintf("device name from %s", pids))
 	ser := flag.String("serial", "", "device serial number")
 	path := flag.String("image", "", "filename of image (bmp, gif, jpeg, png or tiff)")
+	cached := flag.Bool("cache", false, "use cached pre-computed images")
 	row := flag.Int("row", 0, "row of target button")
 	col := flag.Int("col", 0, "column of target button")
 	flag.Parse()
@@ -77,11 +79,22 @@ func Main() int {
 	}
 	defer f.Close()
 
+	d, err := ardilla.NewDeck(pid, *ser)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "failed to open device: %v\n", err)
+		return 1
+	}
+	defer d.Close()
+
 	var img image.Image
 	// Work around the effective immutability of image.Decode type registration.
 	r := asReaderPeaker(f)
 	if hasMagic("GIF8?a", r) {
-		img, err = decodeAllGIF(r)
+		var miss func(image.Image) (*ardilla.RawImage, error)
+		if *cached {
+			miss = d.RawImage
+		}
+		img, err = decodeAllGIF(r, miss)
 	} else {
 		img, _, err = image.Decode(r)
 	}
@@ -89,13 +102,6 @@ func Main() int {
 		fmt.Fprintf(os.Stderr, "failed to decode image data: %v\n", err)
 		return 1
 	}
-
-	d, err := ardilla.NewDeck(pid, *ser)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "failed to open device: %v\n", err)
-		return 1
-	}
-	defer d.Close()
 
 	switch img := img.(type) {
 	case aGIF:
@@ -145,13 +151,15 @@ func asReaderPeaker(r io.Reader) readPeaker {
 // aGIF is an animated GIF.
 type aGIF struct {
 	*gif.GIF
+
+	cache *cache
 }
 
 // decodeAllGIF returns an aGIF or gif.GIF decoded from the provided io.Reader.
 // If the GIF data encodes a single frame, the image returned is a gif.GIF,
 // otherwise an aGIF is returned. When the result is an aGIF, GIF delay,
 // disposal and global background index values are checked for validity.
-func decodeAllGIF(r io.Reader) (image.Image, error) {
+func decodeAllGIF(r io.Reader, miss func(image.Image) (*ardilla.RawImage, error)) (image.Image, error) {
 	g, err := gif.DecodeAll(r)
 	if err != nil {
 		return nil, err
@@ -169,7 +177,51 @@ func decodeAllGIF(r io.Reader) (image.Image, error) {
 	if idx := int(g.BackgroundIndex); ok && idx >= len(pal) {
 		return nil, fmt.Errorf("global background colour index not in palette: %d", idx)
 	}
-	return aGIF{g}, nil
+	var c *cache
+	if miss != nil {
+		c = &cache{
+			cache: make(map[*image.Paletted]*ardilla.RawImage),
+			miss:  miss,
+		}
+	}
+	return aGIF{
+		GIF:   g,
+		cache: c,
+	}, nil
+}
+
+// cache is an ardilla.RawFrame cache.
+type cache struct {
+	mu    sync.Mutex
+	cache map[*image.Paletted]*ardilla.RawImage
+	miss  func(image.Image) (*ardilla.RawImage, error)
+}
+
+// get returns the cached RawImage for the provided key image.
+func (c *cache) get(key *image.Paletted) (image.Image, bool) {
+	if c == nil {
+		return nil, false
+	}
+	c.mu.Lock()
+	r, ok := c.cache[key]
+	c.mu.Unlock()
+	return r, ok
+}
+
+// put calculates and returns an ardilla RawImage for the provided
+// image and caches the result for key.
+func (c *cache) put(key *image.Paletted, img image.Image) (image.Image, error) {
+	if c == nil {
+		return img, nil
+	}
+	r, err := c.miss(img)
+	if err != nil {
+		return nil, err
+	}
+	c.mu.Lock()
+	c.cache[key] = r
+	c.mu.Unlock()
+	return r, nil
 }
 
 func (img aGIF) ColorModel() color.Model {
@@ -206,6 +258,31 @@ func (img aGIF) animate(ctx context.Context, dst draw.Image, fn func(image.Image
 	}
 	for i := 0; i <= loopCount || loopCount == -1; i++ {
 		for f, frame := range img.Image {
+			// Fast path.
+			if r, ok := img.cache.get(frame); ok {
+				err := fn(r)
+				if err != nil {
+					return err
+				}
+				if img.Delay != nil {
+					delay := time.NewTimer(10 * time.Duration(img.Delay[f]) * time.Millisecond)
+					select {
+					case <-ctx.Done():
+						delay.Stop()
+						return nil
+					case <-delay.C:
+					}
+				} else {
+					select {
+					case <-ctx.Done():
+						return nil
+					default:
+					}
+				}
+				continue
+			}
+
+			// Slow path.
 			var restore *image.Paletted
 			if img.Disposal != nil && img.Disposal[f] == restorePrevious {
 				restore = image.NewPaletted(frame.Bounds(), frame.Palette)
@@ -217,7 +294,11 @@ func (img aGIF) animate(ctx context.Context, dst draw.Image, fn func(image.Image
 				return nil
 			default:
 			}
-			err := fn(dst)
+			r, err := img.cache.put(frame, dst)
+			if err != nil {
+				return err
+			}
+			err = fn(r)
 			if err != nil {
 				return err
 			}
