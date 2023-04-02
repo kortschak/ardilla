@@ -622,53 +622,122 @@ func TestDeckSetImage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unable to open test image: %v", err)
 	}
+	defer f.Close()
 	img, err := png.Decode(f)
 	if err != nil {
 		t.Fatalf("unable to open decode image: %v", err)
 	}
 	for _, test := range setImageTests {
 		t.Run(fmt.Sprint(test.pid), func(t *testing.T) {
-			d, err := newTestDeck(test.pid)
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			buf := &imageCapture{headerLen: test.headerLen}
-			dev := &virtDev{Writer: buf}
-			d.setDev(dev)
-
-			err = d.SetImage(test.row, test.col, img)
-			if !sameError(err, test.wantErr) {
-				t.Errorf("unexpected error for SetImage: got:%v want:%v", err, test.wantErr)
-			}
-			if err != nil {
-				return
-			}
-
-			name := fmt.Sprintf("%s-%d-%d.%s", test.pid, test.row, test.col, test.format)
-			path := filepath.Join("testdata", name)
-			if *update {
-				err = os.WriteFile(path, buf.image, 0o644)
-				if err != nil {
-					t.Fatalf("unexpected error writing golden file: %v", err)
+			for _, precompute := range []bool{false, true} {
+				name := "direct"
+				if precompute {
+					name = "precompute"
 				}
-			}
+				t.Run(name, func(t *testing.T) {
+					d, err := newTestDeck(test.pid)
+					if err != nil {
+						t.Fatalf("unexpected error: %v", err)
+					}
+					buf := &imageCapture{headerLen: test.headerLen}
+					dev := &virtDev{Writer: buf}
+					d.setDev(dev)
 
-			want, err := os.ReadFile(path)
+					img := img
+					if precompute && test.wantErr == nil {
+						img, err = d.RawImage(img)
+						if err != nil {
+							t.Fatalf("unexpected error: %v", err)
+						}
+					}
+					err = d.SetImage(test.row, test.col, img)
+					if !sameError(err, test.wantErr) {
+						t.Errorf("unexpected error for SetImage: got:%v want:%v", err, test.wantErr)
+					}
+					if err != nil {
+						return
+					}
+
+					name := fmt.Sprintf("%s-%d-%d.%s", test.pid, test.row, test.col, test.format)
+					path := filepath.Join("testdata", name)
+					if *update {
+						err = os.WriteFile(path, buf.image, 0o644)
+						if err != nil {
+							t.Fatalf("unexpected error writing golden file: %v", err)
+						}
+					}
+
+					want, err := os.ReadFile(path)
+					if err != nil {
+						t.Fatalf("unexpected error reading golden file: %v", err)
+					}
+
+					if !bytes.Equal(buf.image, want) {
+						err = os.WriteFile(filepath.Join("testdata", "failed-"+name), buf.image, 0o644)
+						if err != nil {
+							t.Fatalf("unexpected error writing failed file: %v", err)
+						}
+						t.Errorf("image mismatch: %s", name)
+					}
+
+					if !reflect.DeepEqual(buf.headers, test.wantHeaders) {
+						t.Errorf("unexpected header:\ngot: %#v\nwant:%#v", buf.headers, test.wantHeaders)
+					}
+				})
+			}
+		})
+	}
+}
+
+func BenchmarkSetImage(b *testing.B) {
+	f, err := os.Open("testdata/gopher.png")
+	if err != nil {
+		b.Fatalf("unable to open test image: %v", err)
+	}
+	defer f.Close()
+	img, err := png.Decode(f)
+	if err != nil {
+		b.Fatalf("unable to open decode image: %v", err)
+	}
+	for _, pid := range []PID{StreamDeckOriginal, StreamDeckOriginalV2} {
+		b.Run(pid.String(), func(b *testing.B) {
+			d, err := newTestDeck(pid)
 			if err != nil {
-				t.Fatalf("unexpected error reading golden file: %v", err)
+				b.Fatalf("unexpected error: %v", err)
 			}
-
-			if !bytes.Equal(buf.image, want) {
-				err = os.WriteFile(filepath.Join("testdata", "failed-"+name), buf.image, 0o644)
-				if err != nil {
-					t.Fatalf("unexpected error writing failed file: %v", err)
+			d.setDev(&virtDev{Writer: io.Discard})
+			b.Run("direct", func(b *testing.B) {
+				for i := 0; i < b.N; i++ {
+					err = d.SetImage(0, 0, img)
+					if err != nil {
+						b.Errorf("unexpected error for SetImage: %v", err)
+					}
 				}
-				t.Errorf("image mismatch: %s", name)
+			})
+
+			// rawImage contains the resized image and the raw data.
+			rawImage, err := d.RawImage(img)
+			if err != nil {
+				b.Fatalf("unexpected error: %v", err)
 			}
 
-			if !reflect.DeepEqual(buf.headers, test.wantHeaders) {
-				t.Errorf("unexpected header:\ngot: %#v\nwant:%#v", buf.headers, test.wantHeaders)
-			}
+			b.Run("resized", func(b *testing.B) {
+				for i := 0; i < b.N; i++ {
+					err = d.SetImage(0, 0, rawImage.Image)
+					if err != nil {
+						b.Errorf("unexpected error for SetImage: %v", err)
+					}
+				}
+			})
+
+			b.Run("raw", func(b *testing.B) {
+				for i := 0; i < b.N; i++ {
+					err = d.SetImage(0, 0, rawImage)
+					if err != nil {
+						b.Errorf("unexpected error for SetImage: %v", err)
+					}
+				}
+			})
 		})
 	}
 }

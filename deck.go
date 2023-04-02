@@ -176,11 +176,9 @@ func (d *Deck) SetBrightness(percent int) error {
 }
 
 // SetImage renders the provided image on the button at the given row and
-// column.
+// column. If img is a *RawImage the internal representation will be used
+// directly. RawImage values may not be shared between different products.
 func (d *Deck) SetImage(row, col int, img image.Image) error {
-	if !d.desc.visual {
-		return fmt.Errorf("images not supported by %s", d.desc)
-	}
 	if row < 0 || d.desc.rows < row {
 		return fmt.Errorf("row out of bounds: %d", row)
 	}
@@ -189,17 +187,24 @@ func (d *Deck) SetImage(row, col int, img image.Image) error {
 	}
 	key := row*d.desc.cols + col
 
-	if img.Bounds() != d.desc.bounds() {
-		dst := image.NewRGBA(d.desc.bounds())
-		draw.BiLinear.Scale(dst, keepAspectRatio(dst, img), img, img.Bounds(), draw.Src, nil)
-		img = dst
+	var (
+		raw *RawImage
+		err error
+	)
+	switch img := img.(type) {
+	case *RawImage:
+		if img.pid != d.desc.PID {
+			return fmt.Errorf("invalid RawImage: using %s image on %s", img.pid, d.desc.PID)
+		}
+		raw = img
+	default:
+		raw, err = d.RawImage(img)
+		if err != nil {
+			return err
+		}
 	}
+	buf := bytes.NewReader(raw.data)
 
-	var buf bytes.Buffer
-	err := d.desc.encode(&buf, d.desc.transform(img))
-	if err != nil {
-		return err
-	}
 	pkt := make([]byte, d.desc.imgReportLen)
 	copy(pkt, d.desc.imageHeader)
 	var page int
@@ -217,6 +222,43 @@ func (d *Deck) SetImage(row, col int, img image.Image) error {
 		page++
 	}
 	return nil
+}
+
+// RawImage returns an image.Image that has been resized to fit the Deck's
+// button size and has had the internal image representation pre-computed.
+func (d *Deck) RawImage(img image.Image) (*RawImage, error) {
+	if !d.desc.visual {
+		return nil, fmt.Errorf("images not supported by %s", d.desc)
+	}
+
+	if img.Bounds() != d.desc.bounds() {
+		dst := image.NewRGBA(d.desc.bounds())
+		draw.BiLinear.Scale(dst, keepAspectRatio(dst, img), img, img.Bounds(), draw.Src, nil)
+		img = dst
+	}
+
+	var buf bytes.Buffer
+	err := d.desc.encode(&buf, d.desc.transform(img))
+	if err != nil {
+		return nil, err
+	}
+	return &RawImage{rawImage{
+		Image: img,
+		data:  buf.Bytes(),
+		pid:   d.desc.PID,
+	}}, nil
+}
+
+// RawImage is an image.Image that holds pre-computed data in the raw format
+// used by a specific El Gato Stream Deck device.
+type RawImage struct {
+	rawImage
+}
+
+type rawImage struct {
+	image.Image
+	data []byte
+	pid  PID
 }
 
 func keepAspectRatio(dst, src image.Image) image.Rectangle {
