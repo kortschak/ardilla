@@ -91,10 +91,9 @@ func Serials(pid PID) ([]string, error) {
 	return serials, nil
 }
 
-// Sends a blank key report to the Stream Deck, resetting the key image
-// streamer in the device. This prevents previously started partial key
-// writes that were not completed from corrupting images sent from this
-// application.
+// ResetKeyStream sends a blank key report to the Stream Deck, resetting the
+// key image streamer in the device. This prevents previously started partial
+// writes from corrupting images sent later.
 func (d *Deck) ResetKeyStream() error {
 	if !d.desc.visual {
 		return nil
