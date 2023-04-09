@@ -192,10 +192,15 @@ func (d *Deck) SetImage(row, col int, img image.Image) error {
 	)
 	switch img := img.(type) {
 	case *RawImage:
-		if img.pid != d.desc.PID {
-			return fmt.Errorf("invalid RawImage: using %s image on %s", img.pid, d.desc.PID)
+		if img.pid == d.desc.PID {
+			raw = img
+			break
 		}
-		raw = img
+		// Unwrap the original and reprocess.
+		raw, err = d.RawImage(img.rawImage.Image) //lint:ignore QF1008 rawImage included for clarity.
+		if err != nil {
+			return err
+		}
 	default:
 		raw, err = d.RawImage(img)
 		if err != nil {
@@ -229,6 +234,13 @@ func (d *Deck) SetImage(row, col int, img image.Image) error {
 func (d *Deck) RawImage(img image.Image) (*RawImage, error) {
 	if !d.desc.visual {
 		return nil, fmt.Errorf("images not supported by %s", d.desc)
+	}
+	if raw, ok := img.(*RawImage); ok {
+		if raw.pid == d.desc.PID {
+			return raw, nil
+		}
+		// Unwrap the original and reprocess.
+		img = raw.Image
 	}
 
 	orig := img

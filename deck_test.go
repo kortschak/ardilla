@@ -652,6 +652,23 @@ func TestDeckSetImage(t *testing.T) {
 						if err != nil {
 							t.Fatalf("unexpected error: %v", err)
 						}
+						new, err := d.RawImage(img)
+						if err != nil {
+							t.Fatalf("unexpected error: %v", err)
+						}
+						if new != img {
+							t.Errorf("d.RawImage made new RawImage from a RawImage: %p != %p", new, img)
+						}
+						// Make a RawImage from a different PID.
+						other := *new
+						other.pid = 0 // Zero matches no El Gato device.
+						new, err = d.RawImage(&other)
+						if err != nil {
+							t.Fatalf("unexpected error: %v", err)
+						}
+						if new == &other {
+							t.Errorf("d.RawImage did not make new RawImage from a different deck's RawImage: %p == %p", new, &other)
+						}
 					}
 					err = d.SetImage(test.row, test.col, img)
 					if !sameError(err, test.wantErr) {
