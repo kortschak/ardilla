@@ -298,6 +298,11 @@ func (d *Deck) Bounds() (image.Rectangle, error) {
 	return d.desc.bounds(), nil
 }
 
+// PID returns the effective PID of the receiver..
+func (d *Deck) PID() PID {
+	return d.desc.PID
+}
+
 // Serial returns the serial number of the device.
 func (d *Deck) Serial() (string, error) {
 	payloadLen := d.desc.serialPayloadLen
