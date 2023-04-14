@@ -176,7 +176,7 @@ func (d *Deck) SetBrightness(percent int) error {
 
 // SetImage renders the provided image on the button at the given row and
 // column. If img is a *RawImage the internal representation will be used
-// directly. RawImage values may not be shared between different products.
+// directly.
 func (d *Deck) SetImage(row, col int, img image.Image) error {
 	if row < 0 || d.desc.rows < row {
 		return fmt.Errorf("row out of bounds: %d", row)
