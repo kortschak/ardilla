@@ -6,9 +6,12 @@ package ardilla
 
 import (
 	"bytes"
+	"context"
+	"errors"
 	"fmt"
 	"image"
 	"io"
+	"time"
 	"unsafe"
 
 	"golang.org/x/image/draw"
@@ -18,9 +21,10 @@ import (
 
 // Deck is a Stream Deck device.
 type Deck struct {
-	desc *device
-	dev  hidDevice
-	buf  []byte
+	desc   *device
+	serial string // serial is the cached serial for reconnection.
+	dev    hidDevice
+	buf    []byte
 }
 
 type hidDevice interface {
@@ -64,13 +68,75 @@ func NewDeck(pid PID, serial string) (*Deck, error) {
 	if err != nil {
 		return nil, err
 	}
-	d := &Deck{desc: &desc, dev: dev, buf: make([]byte, desc.bufLen())}
+	d := &Deck{desc: &desc, serial: serial, dev: dev, buf: make([]byte, desc.bufLen())}
 	err = d.ResetKeyStream()
 	if err != nil {
 		d.dev.Close()
 		return nil, err
 	}
+	if d.serial == "" {
+		d.serial, err = d.Serial()
+		if err != nil {
+			d.dev.Close()
+			return nil, err
+		}
+	}
 	return d, nil
+}
+
+// ErrNotConnected indicates that the Deck is no longer connected.
+var ErrNotConnected = errors.New("device not connected")
+
+// Reconnect attempts to reconnect to the receiver's device each delay until
+// successful or the context is cancelled. Reconnect returns the last error
+// if ctx is cancelled.
+func (d *Deck) Reconnect(ctx context.Context, delay time.Duration) error {
+	var err error
+	for {
+		timer := time.NewTimer(delay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return err
+		case <-timer.C:
+		}
+		var found bool
+		hid.Enumerate(vidElGato, uint16(d.PID()), func(info *hid.DeviceInfo) error {
+			if info.SerialNbr == d.serial {
+				found = true
+			}
+			return nil
+		})
+		if !found {
+			err = ErrNotConnected
+			continue
+		}
+		var _d *Deck
+		_d, err = NewDeck(d.PID(), d.serial)
+		if err == nil {
+			d.Close()
+			*d = *_d
+			return nil
+		}
+	}
+	return err
+}
+
+func (d *Deck) checkConnected(err error) error {
+	if err == nil {
+		return nil
+	}
+	var found bool
+	hid.Enumerate(vidElGato, uint16(d.PID()), func(info *hid.DeviceInfo) error {
+		if info.SerialNbr == d.serial {
+			found = true
+		}
+		return nil
+	})
+	if !found {
+		return ErrNotConnected
+	}
+	return err
 }
 
 // Serials returns the list of El Gato device serial numbers matching the
@@ -132,13 +198,13 @@ func (d *Deck) Len() int {
 	return d.desc.rows * d.desc.cols
 }
 
-// KeyStates returns a slice of booleans indicating which buttons are pressed
+// KeyStates returns a slice of booleans indicating which buttons are pressed.
 // The length of the returned slice is given by the Len method.
 func (d *Deck) KeyStates() ([]bool, error) {
 	buf := make([]byte, d.desc.keyStatesOffset+d.Len())
 	_, err := d.dev.Read(buf)
 	if err != nil {
-		return nil, err
+		return nil, d.checkConnected(err)
 	}
 	buf = buf[d.desc.keyStatesOffset:]
 	return *(*[]bool)(unsafe.Pointer(&buf)), nil
@@ -154,7 +220,7 @@ func (d *Deck) Reset() error {
 	zero(buf)
 	copy(buf, d.desc.reset)
 	_, err := d.dev.SendFeatureReport(buf)
-	return err
+	return d.checkConnected(err)
 }
 
 // SetBrightness sets the global screen brightness of the Stream Deck, across
@@ -171,7 +237,7 @@ func (d *Deck) SetBrightness(percent int) error {
 	copy(buf, d.desc.brightness)
 	buf[len(d.desc.brightness)] = byte(percent)
 	_, err := d.dev.SendFeatureReport(buf)
-	return err
+	return d.checkConnected(err)
 }
 
 // SetImage renders the provided image on the button at the given row and
@@ -221,7 +287,7 @@ func (d *Deck) SetImage(row, col int, img image.Image) error {
 		d.desc.fillHeader(pkt[:len(d.desc.imageHeader)], key, page, n, done)
 		_, err = d.dev.Write(pkt)
 		if err != nil {
-			return err
+			return d.checkConnected(err)
 		}
 		page++
 	}
@@ -305,6 +371,9 @@ func (d *Deck) PID() PID {
 
 // Serial returns the serial number of the device.
 func (d *Deck) Serial() (string, error) {
+	if d.serial != "" {
+		return d.serial, nil
+	}
 	payloadLen := d.desc.serialPayloadLen
 	if payloadLen == 0 {
 		payloadLen = d.desc.payloadLen
@@ -319,7 +388,7 @@ func (d *Deck) Serial() (string, error) {
 	if idx < 0 {
 		return string(buf), nil
 	}
-	return string(buf[:idx]), err
+	return string(buf[:idx]), d.checkConnected(err)
 }
 
 // Firmware returns the firmware version number of the device.
@@ -334,7 +403,7 @@ func (d *Deck) Firmware() (string, error) {
 	if idx < 0 {
 		return string(buf), nil
 	}
-	return string(buf[:idx]), err
+	return string(buf[:idx]), d.checkConnected(err)
 }
 
 func zero(b []byte) {
